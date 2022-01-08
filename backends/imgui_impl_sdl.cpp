@@ -260,6 +260,7 @@ static bool ImGui_ImplSDL2_Init(SDL_Window* window, void* sdl_gl_context)
     bd->MouseCursors[ImGuiMouseCursor_Hand] = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_HAND);
     bd->MouseCursors[ImGuiMouseCursor_NotAllowed] = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NO);
 
+    // Set platform dependent data in viewport
     // Our mouse update function expect PlatformHandle to be filled for the main viewport
     ImGuiViewport* main_viewport = ImGui::GetMainViewport();
     main_viewport->PlatformHandle = (void*)window;
@@ -267,7 +268,7 @@ static bool ImGui_ImplSDL2_Init(SDL_Window* window, void* sdl_gl_context)
     SDL_SysWMinfo info;
     SDL_VERSION(&info.version);
     if (SDL_GetWindowWMInfo(window, &info))
-        main_viewport->PlatformHandleRaw = info.info.win.window;
+        main_viewport->PlatformHandleRaw = (void*)info.info.win.window;
 #endif
 
     // Set SDL hint to receive mouse click events on window focus, otherwise SDL doesn't emit the event.
@@ -320,10 +321,16 @@ bool ImGui_ImplSDL2_InitForMetal(SDL_Window* window)
     return ImGui_ImplSDL2_Init(window, NULL);
 }
 
+bool ImGui_ImplSDL2_InitForSDLRenderer(SDL_Window* window)
+{
+    return ImGui_ImplSDL2_Init(window, NULL);
+}
+
 void ImGui_ImplSDL2_Shutdown()
 {
-    ImGuiIO& io = ImGui::GetIO();
     ImGui_ImplSDL2_Data* bd = ImGui_ImplSDL2_GetBackendData();
+    IM_ASSERT(bd != NULL && "No platform backend to shutdown, or already shutdown?");
+    ImGuiIO& io = ImGui::GetIO();
 
     ImGui_ImplSDL2_ShutdownPlatformInterface();
 
@@ -770,4 +777,5 @@ static void ImGui_ImplSDL2_InitPlatformInterface(SDL_Window* window, void* sdl_g
 
 static void ImGui_ImplSDL2_ShutdownPlatformInterface()
 {
+    ImGui::DestroyPlatformWindows();
 }

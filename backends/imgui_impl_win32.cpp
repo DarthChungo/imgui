@@ -35,8 +35,9 @@ typedef DWORD (WINAPI *PFN_XInputGetState)(DWORD, XINPUT_STATE*);
 // CHANGELOG
 // (minor and older changes stripped away, please see git history for details)
 //  2021-XX-XX: Platform: Added support for multiple windows via the ImGuiPlatformIO interface.
+//  2021-12-16: Inputs: Fill VK_LCONTROL/VK_RCONTROL/VK_LSHIFT/VK_RSHIFT/VK_LMENU/VK_RMENU for completeness.
 //  2021-08-17: Calling io.AddFocusEvent() on WM_SETFOCUS/WM_KILLFOCUS messages.
-//  2021-08-02: Inputs: Fixed keyboard modifiers being reported when host windo doesn't have focus.
+//  2021-08-02: Inputs: Fixed keyboard modifiers being reported when host window doesn't have focus.
 //  2021-07-29: Inputs: MousePos is correctly reported when the host platform window is hovered but not focused (using TrackMouseEvent() to receive WM_MOUSELEAVE events).
 //  2021-06-29: Reorganized backend to pull data from a single structure to facilitate usage with multiple-contexts (all g_XXXX access changed to bd->XXXX).
 //  2021-06-08: Fixed ImGui_ImplWin32_EnableDpiAwareness() and ImGui_ImplWin32_GetDpiScaleForMonitor() to handle Windows 8.1/10 features without a manifest (per-monitor DPI, and properly calls SetProcessDpiAwareness() on 8.1).
@@ -187,8 +188,10 @@ bool    ImGui_ImplWin32_Init(void* hwnd)
 
 void    ImGui_ImplWin32_Shutdown()
 {
-    ImGuiIO& io = ImGui::GetIO();
     ImGui_ImplWin32_Data* bd = ImGui_ImplWin32_GetBackendData();
+    IM_ASSERT(bd != NULL && "No platform backend to shutdown, or already shutdown?");
+    ImGuiIO& io = ImGui::GetIO();
+
     ImGui_ImplWin32_ShutdownPlatformInterface();
 
     // Unload XInput library
@@ -501,11 +504,23 @@ IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARA
         if (wParam < 256)
             io.KeysDown[wParam] = down;
         if (wParam == VK_CONTROL)
-            io.KeyCtrl = down;
+        {
+            io.KeysDown[VK_LCONTROL] = ((::GetKeyState(VK_LCONTROL) & 0x8000) != 0);
+            io.KeysDown[VK_RCONTROL] = ((::GetKeyState(VK_RCONTROL) & 0x8000) != 0);
+            io.KeyCtrl = io.KeysDown[VK_LCONTROL] || io.KeysDown[VK_RCONTROL];
+        }
         if (wParam == VK_SHIFT)
-            io.KeyShift = down;
+        {
+            io.KeysDown[VK_LSHIFT] = ((::GetKeyState(VK_LSHIFT) & 0x8000) != 0);
+            io.KeysDown[VK_RSHIFT] = ((::GetKeyState(VK_RSHIFT) & 0x8000) != 0);
+            io.KeyShift            = io.KeysDown[VK_LSHIFT] || io.KeysDown[VK_RSHIFT];
+        }
         if (wParam == VK_MENU)
-            io.KeyAlt = down;
+        {
+            io.KeysDown[VK_LMENU] = ((::GetKeyState(VK_LMENU) & 0x8000) != 0);
+            io.KeysDown[VK_RMENU] = ((::GetKeyState(VK_RMENU) & 0x8000) != 0);
+            io.KeyAlt             = io.KeysDown[VK_LMENU] || io.KeysDown[VK_RMENU];
+        }
         return 0;
     }
     case WM_SETFOCUS:
@@ -654,35 +669,6 @@ float ImGui_ImplWin32_GetDpiScaleForHwnd(void* hwnd)
     HMONITOR monitor = ::MonitorFromWindow((HWND)hwnd, MONITOR_DEFAULTTONEAREST);
     return ImGui_ImplWin32_GetDpiScaleForMonitor(monitor);
 }
-
-
-//--------------------------------------------------------------------------------------------------------
-// IME (Input Method Editor) basic support for e.g. Asian language users
-//--------------------------------------------------------------------------------------------------------
-
-#if defined(WINAPI_FAMILY) && (WINAPI_FAMILY == WINAPI_FAMILY_APP) // UWP doesn't have Win32 functions
-#define IMGUI_DISABLE_WIN32_DEFAULT_IME_FUNCTIONS
-#endif
-
-#if defined(_WIN32) && !defined(IMGUI_DISABLE_WIN32_FUNCTIONS) && !defined(IMGUI_DISABLE_WIN32_DEFAULT_IME_FUNCTIONS)
-#define HAS_WIN32_IME   1
-#include <imm.h>
-#ifdef _MSC_VER
-#pragma comment(lib, "imm32")
-#endif
-static void ImGui_ImplWin32_SetImeInputPos(ImGuiViewport* viewport, ImVec2 pos)
-{
-    COMPOSITIONFORM cf = { CFS_FORCE_POSITION,{ (LONG)(pos.x - viewport->Pos.x), (LONG)(pos.y - viewport->Pos.y) },{ 0, 0, 0, 0 } };
-    if (HWND hwnd = (HWND)viewport->PlatformHandle)
-        if (HIMC himc = ::ImmGetContext(hwnd))
-        {
-            ::ImmSetCompositionWindow(himc, &cf);
-            ::ImmReleaseContext(hwnd, himc);
-        }
-}
-#else
-#define HAS_WIN32_IME   0
-#endif
 
 //--------------------------------------------------------------------------------------------------------
 // MULTI-VIEWPORT / PLATFORM INTERFACE SUPPORT
@@ -986,9 +972,6 @@ static void ImGui_ImplWin32_InitPlatformInterface()
     platform_io.Platform_UpdateWindow = ImGui_ImplWin32_UpdateWindow;
     platform_io.Platform_GetWindowDpiScale = ImGui_ImplWin32_GetWindowDpiScale; // FIXME-DPI
     platform_io.Platform_OnChangedViewport = ImGui_ImplWin32_OnChangedViewport; // FIXME-DPI
-#if HAS_WIN32_IME
-    platform_io.Platform_SetImeInputPos = ImGui_ImplWin32_SetImeInputPos;
-#endif
 
     // Register main window handle (which is owned by the main application, not by us)
     // This is mostly for simplicity and consistency, so that our code (e.g. mouse handling etc.) can use same logic for main and secondary viewports.
@@ -1004,6 +987,7 @@ static void ImGui_ImplWin32_InitPlatformInterface()
 static void ImGui_ImplWin32_ShutdownPlatformInterface()
 {
     ::UnregisterClass(_T("ImGui Platform"), ::GetModuleHandle(NULL));
+    ImGui::DestroyPlatformWindows();
 }
 
 //---------------------------------------------------------------------------------------------------------
